@@ -1,0 +1,126 @@
+return {
+	["nextUpdate"] = 598.00854492188,
+	["bot"] = {
+		["point"] = {
+			["y"] = 0,
+			["x"] = 12100,
+			["z"] = 2100,
+		},
+	},
+	["ally"] = {
+		["jungle"] = {
+		},
+		["unknown"] = {
+		},
+		["champions"] = {
+			[1] = {
+				["jungle"] = 0,
+				["bot"] = 0,
+				["top"] = 0,
+				["mid"] = 0,
+				["isJungler"] = false,
+			},
+			[2] = {
+				["jungle"] = 0,
+				["bot"] = 2570,
+				["top"] = 0,
+				["mid"] = 0,
+				["isJungler"] = false,
+			},
+			[4] = {
+				["jungle"] = 0,
+				["bot"] = 0,
+				["top"] = 0,
+				["mid"] = 7380,
+				["isJungler"] = false,
+			},
+			[3] = {
+				["jungle"] = 0,
+				["bot"] = 0,
+				["top"] = 6750,
+				["mid"] = 0,
+				["isJungler"] = false,
+			},
+			[5] = {
+				["jungle"] = 0,
+				["bot"] = 0,
+				["top"] = 6870,
+				["mid"] = 0,
+				["isJungler"] = false,
+			},
+		},
+		["bot"] = {
+		},
+		["top"] = {
+		},
+		["mid"] = {
+		},
+	},
+	["myLane"] = "unknown",
+	["mapIndex"] = 1,
+	["tickUpdate"] = 0.25,
+	["mid"] = {
+		["point"] = {
+			["y"] = 0,
+			["x"] = 7100,
+			["z"] = 7100,
+		},
+	},
+	["enemy"] = {
+		["jungle"] = {
+		},
+		["unknown"] = {
+		},
+		["champions"] = {
+			[1] = {
+				["jungle"] = 44,
+				["bot"] = 7620,
+				["top"] = 0,
+				["mid"] = 0,
+				["isJungler"] = false,
+			},
+			[2] = {
+				["jungle"] = 274,
+				["bot"] = 0,
+				["top"] = 4860,
+				["mid"] = 0,
+				["isJungler"] = false,
+			},
+			[4] = {
+				["jungle"] = 55,
+				["bot"] = 7510,
+				["top"] = 0,
+				["mid"] = 0,
+				["isJungler"] = false,
+			},
+			[3] = {
+				["jungle"] = 0,
+				["bot"] = 0,
+				["top"] = 0,
+				["mid"] = 8060,
+				["isJungler"] = false,
+			},
+			[5] = {
+				["jungle"] = 192,
+				["bot"] = 0,
+				["top"] = 5540,
+				["mid"] = 0,
+				["isJungler"] = false,
+			},
+		},
+		["bot"] = {
+		},
+		["top"] = {
+		},
+		["mid"] = {
+		},
+	},
+	["stopTime"] = 600,
+	["top"] = {
+		["point"] = {
+			["y"] = 0,
+			["x"] = 1900,
+			["z"] = 12600,
+		},
+	},
+}

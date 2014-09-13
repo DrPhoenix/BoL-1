@@ -1,0 +1,413 @@
+--[[
+	BugsplatAvoider 0.99.2 (beta) by Husky
+	========================================================================
+
+	This library prevents the game from bugsplatting by executing the script
+	in a safe environment. Instead of closing the game, the error is shown
+	in the chat and written to a log file (bugsplat.txt). Additionally to
+	sanitizing the function arguments that are passed to Bot of Legends it
+	introduces a reliable "object.valid" attribute for all ingame objects
+	that lets you check if an object got deleted from the memory or is still
+	existing.
+
+	Usage
+	~~~~~
+
+	Add the following command to the script that shall be secured:
+
+		require "BugsplatAvoider" do return AvoidBugsplats() end
+
+	(This has to be the very first command in the file.)
+
+	Changelog
+	~~~~~~~~~
+
+	0.99 (beta)		- fixed the most common errors (reading invalid objects)
+					- sanitized some of the functions that are known to bugsplat
+					  the game
+					- added a stack trace to error messages to easily identify the
+					  cause of errors
+					- exceptions are divided into warnings and errors (errors
+					  are more severe and pause the script execution)
+
+	0.99.1 (beta)	- fixed an error with GetSpellData()
+					- the bugsplat.txt gets cleaned up on a daily basis now
+					- sanitized DrawText (thx to extragoZ)
+					- critical errors do not pause the script execution anymore
+
+	0.99.2 (beta)	- errors that occur more than 1 time do not get spammed into
+					  the chat anymore but get collected and dumped out every 60
+					  seconds
+					- fixed an error with HoldPosition()
+					- player is now sanitized as well, to make this library work
+					  with scripts that use AllClasses player instead of myHero
+					- fixed an error with OnprocessSpell not sanitizing the object
+					- fixed an error with objects returned from objManager and
+					  heroManager not being sanitized
+					- BugsplatAvoider is now fully compatible with the AllClass
+					  Library
+					- Changed the way BugsplatAvoider loads, to separate the loading
+					  of the library from the start of the bugsplat avoider (will be
+					  required for future use when Bugsplat Avoider will be included
+					  by default - like AllClass)
+					- Bugsplat Avoider doesnt show the error trace in the chat anymore
+					  unless the library was called in debug mode (used by developers)
+]]
+
+-- Config ----------------------------------------------------------------------
+
+showErrorsInChat       = true
+showWarningsInChat     = true
+showErrorTraceInChat   = false
+showWarningTraceInChat = false
+logErrors              = true
+logWarnings            = true
+pauseScriptOnErrors    = false
+pauseScriptOnWarnings  = false
+sameErrorInterval      = 60000
+
+objectCreationWrappers = {
+	OnDeleteObj    = function(object) callBackWrappers.OnDeleteObj(object) increaseExtendedHash(object.hash) end,
+}
+
+callBackWrappers = {
+	OnLoad         = function() sanitizeCObjects() functionResult, errorMsg = xpcall(function() return originalEntities.OnLoad() end, resolveError) if not functionResult then handleError(errorMsg) end end,
+	OnDraw         = function() functionResult, errorMsg = xpcall(function() return originalEntities.OnDraw() end, resolveError) if not functionResult then handleError(errorMsg) end end,
+	OnTick         = function() functionResult, errorMsg = xpcall(function() return originalEntities.OnTick() end, resolveError) if not functionResult then handleError(errorMsg) end end,
+	OnUnload       = function() functionResult, errorMsg = xpcall(function() return originalEntities.OnUnload() end, resolveError) if not functionResult then handleError(errorMsg) end end,
+	OnCreateObj    = function(object) functionResult, errorMsg = xpcall(function() return originalEntities.OnCreateObj(sanitizeUnit(object)) end, resolveError) if not functionResult then handleError(errorMsg) end end,
+	OnDeleteObj    = function(object) functionResult, errorMsg = xpcall(function() return originalEntities.OnDeleteObj(sanitizeUnit(object)) end, resolveError) if not functionResult then handleError(errorMsg) end end,
+	OnWndMsg       = function(msg, wParam) functionResult, errorMsg = xpcall(function() return originalEntities.OnWndMsg(msg, wParam) end, resolveError) if not functionResult then handleError(errorMsg) end end,
+	OnProcessSpell = function(object, spellProc) functionResult, errorMsg = xpcall(function() return originalEntities.OnProcessSpell(sanitizeUnit(object), spellProc) end, resolveError) if not functionResult then handleError(errorMsg) end end,
+	OnSendChat     = function(text) functionResult, errorMsg = xpcall(function() return originalEntities.OnSendChat(text) end, resolveError) if not functionResult then handleError(errorMsg) end end,
+	OnRecvPacket   = function(LoLPacket) functionResult, errorMsg = xpcall(function() return originalEntities.OnRecvPacket(LoLPacket) end, resolveError) if not functionResult then handleError(errorMsg) end end,
+	OnSendPacket   = function(LoLPacket) functionResult, errorMsg = xpcall(function() return originalEntities.OnSendPacket(LoLPacket) end, resolveError) if not functionResult then handleError(errorMsg) end end
+}
+
+sanitizedCFunctions = {
+	SendPacket     = function(p) if p ~= nil then return originalEntities.SendPacket(p) else _G.error({msg = "No matching overload found, candidates: void SendPacket(CLoLPacket*)", stackTrace = generateStackTrace(2), type = "ERROR"}) end end,
+	GetSpellData   = function(iSpell) return myHero:GetSpellData(iSpell) end,
+	GetMyHero      = function() return myHero end,
+	GetTarget      = function() return sanitizeUnit(originalEntities.GetTarget()) end,
+	CastSpell      = function(iSpell, arg1, arg2) if arg1 and arg2 then return originalEntities.CastSpell(iSpell, arg1, arg2) elseif arg1 then return originalEntities.CastSpell(iSpell, arg1.userdataObject) else return originalEntities.CastSpell(iSpell) end end,
+	PrintFloatText = function(target, iMode, text) return originalEntities.PrintFloatText(target.userdataObject, iMode, text) end,
+	WorldToScreen  = function(unit) return originalEntities.WorldToScreen(unit.userdataObject) end,
+	DrawText       = function(text, size, x, y, color) if size >= 74973180 then _G.error({msg = "Invalid text size (" .. tostring(size) .. " is too big) passed to DrawText", stackTrace = generateStackTrace(2), type = "ERROR"}) else return originalEntities.DrawText(text, size, x, y, color) end end,
+	PrintChat      = function(text) originalEntities.PrintChat(text) end
+}
+
+sanitizedCObjects = {
+	myHero = {
+		HoldPosition     = function(unit) return originalEntities.myHero.HoldPosition(unit.userdataObject) end,
+		MoveTo           = function(unit, x, z) return originalEntities.myHero.MoveTo(unit.userdataObject, x, z) end,
+		Attack           = function(unit, target) if target ~= nil then if type(target) == "table" and target.userdataObject ~= nil then if target.valid then originalEntities.myHero.Attack(unit.userdataObject, target.userdataObject) else _G.error({msg = "Trying to attack an invalid object", stackTrace = generateStackTrace(2), type = "ERROR"}) end else originalEntities.myHero.Attack(unit.userdataObject, target) end else _G.error({msg = "No matching overload found, candidates: void Attack(CUnit&,Cunit*)", stackTrace = generateStackTrace(2), type = "ERROR"}) end end,
+		GetDistance      = function(unit, target) if target ~= nil then if type(target) == "table" and target.userdataObject ~= nil then if target.valid then return originalEntities.myHero.GetDistance(unit.userdataObject, target.userdataObject) else _G.error({msg = "Trying to calculate the distance to an invalid object", stackTrace = generateStackTrace(2), type = "ERROR"}) end else return originalEntities.myHero.GetDistance(unit.userdataObject, target) end else return _G.error({msg = "No matching overload found, candidates: custom [float] GetDistance(CUnit&,Cunit*) custom [float] GetDistance(CUnit&,D3DXVECTOR3*)", stackTrace = generateStackTrace(2), type = "ERROR"}) end end,
+		CalcDamage       = function(unit, target, fDmg) if target ~= nil then if type(target) == "table" and target.userdataObject ~= nil then if target.valid then if fDmg == nil then return originalEntities.myHero.CalcDamage(unit.userdataObject, target.userdataObject) else return originalEntities.myHero.CalcDamage(unit.userdataObject, target.userdataObject, fDmg) end else _G.error({msg = "Trying to calculate the damage for an invalid target", stackTrace = generateStackTrace(2), type = "ERROR"}) end else if fDmg == nil then return originalEntities.myHero.CalcDamage(unit.userdataObject, target) else return originalEntities.myHero.CalcDamage(unit.userdataObject, target, fDmg) end end else return _G.error({msg = "Noo matching overload found, candidates: custom [float] CalcDamage(CUnit&,Cunit*) custom [float] CalcDamage(CUnit&,Cunit*,custom [float])", stackTrace = generateStackTrace(2), type = "ERROR"}) end end,
+		CalcMagicDamage  = function(unit, target, fDmg) if target ~= nil then if type(target) == "table" and target.userdataObject ~= nil then if target.valid then if fDmg == nil then return originalEntities.myHero.CalcMagicDamage(unit.userdataObject, target.userdataObject) else return originalEntities.myHero.CalcMagicDamage(unit.userdataObject, target.userdataObject, fDmg) end else _G.error({msg = "Trying to calculate the damage for an invalid target", stackTrace = generateStackTrace(2), type = "ERROR"}) end else if fDmg == nil then return originalEntities.myHero.CalcMagicDamage(unit.userdataObject, target) else return originalEntities.myHero.CalcMagicDamage(unit.userdataObject, target, fDmg) end end else return _G.error({msg = "No matching overload found, candidates: custom [float] CalcMagicDamage(CUnit&,Cunit*) custom [float] CalcMagicDamage(CUnit&,Cunit*,custom [float])", stackTrace = generateStackTrace(2), type = "ERROR"}) end end,
+		getBuff          = function(unit, iIndex) return originalEntities.myHero.getBuff(unit.userdataObject, iIndex) end,
+		getInventorySlot = function(unit, iSlot) return originalEntities.myHero.getInventorySlot(unit.userdataObject, iSlot) end,
+		getItem          = function(unit, iSlot) return originalEntities.myHero.getItem(unit.userdataObject, iSlot) end,
+		GetSpellData     = function(unit, iSpell) if iSpell == SPELL_1 or iSpell == SPELL_2 or iSpell == SPELL_3 or iSpell == SPELL_4 or iSpell == SUMMONER_1 or iSpell == SUMMONER_2 or iSpell == RECALL or (iSpell == ITEM_1 and myHero:CanUseSpell(iSpell) ~= 1) or (iSpell == ITEM_2 and myHero:CanUseSpell(iSpell) ~= 1) or (iSpell == ITEM_3 and myHero:CanUseSpell(iSpell) ~= 1) or (iSpell == ITEM_4 and myHero:CanUseSpell(iSpell) ~= 1) or (iSpell == ITEM_5 and myHero:CanUseSpell(iSpell) ~= 1) or (iSpell == ITEM_6 and myHero:CanUseSpell(iSpell) ~= 1) then return originalEntities.myHero.GetSpellData(unit.userdataObject, iSpell) else _G.error({msg = "Invalid spell id (" .. tostring(iSpell) .. ") passed to GetSpellData", stackTrace = generateStackTrace(2), type = "ERROR"}) end end,
+		CanUseSpell      = function(unit, iSpell) return originalEntities.myHero.CanUseSpell(unit.userdataObject, iSpell) end
+	},
+	objManager = {
+		getObject = function(objManager, iIndex) return sanitizeUnit(originalEntities.objManager.getObject(objManager.userdataObject, iIndex)) end,
+		GetObject = function(objManager, iIndex) return sanitizeUnit(originalEntities.objManager.getObject(objManager.userdataObject, iIndex)) end
+	},
+	heroManager = {
+		getHero = function(heroManager, iIndex) return sanitizeUnit(originalEntities.heroManager.getHero(heroManager.userdataObject, iIndex)) end,
+		GetHero = function(heroManager, iIndex) return sanitizeUnit(originalEntities.heroManager.getHero(heroManager.userdataObject, iIndex)) end
+	}
+}
+
+-- Globals ---------------------------------------------------------------------
+globalEnv           = GetGVar("GLOBAL_ENV") if not globalEnv then globalEnv = {validObjectsTable = {}, currentObjects = {}} SetGVar("GLOBAL_ENV", globalEnv) end globalEnv = {validObjectsTable = {}, currentObjects = {}}
+executedScriptName  = SCRIPT_FILENAME
+executedLineNumber  = debug.getinfo(3).currentline
+objectMetaTable     = {__index = function(table, key) if key == "valid" then return table.extendedHash == getCurrentExtendedHash(table.rawHash) elseif table.valid then return table.userdataObject[key] else _G.error({msg = "read access to invalid object", stackTrace = generateStackTrace(0), type = "ERROR"}) end end, __newindex = function(table, key, value) if table.valid then table.userdataObject[key] = value else _G.error({msg = "write access to invalid object", stackTrace = generateStackTrace(0), type = "ERROR"}) end end}
+originalEntities    = {}
+errorOccurenceTable = {}
+
+-- Code ------------------------------------------------------------------------
+
+function hook(hookType, lineNumber)
+	if globalEnv.bugSplatDetected or lineNumber == 340 or lineNumber == 341  then return end
+
+	globalEnv.lastLine = lineNumber + executedLineNumber
+	globalEnv.lastSource = executedScriptName
+end
+
+function getCurrentExtendedHash(hash)
+	if globalEnv.validObjectsTable[hash] == nil then
+		globalEnv.validObjectsTable[hash] = 1
+	end
+
+	return hash .. "_" .. tostring(globalEnv.validObjectsTable[hash])
+end
+
+function increaseExtendedHash(hash)
+	if globalEnv.validObjectsTable[hash] == nil then
+		globalEnv.validObjectsTable[hash] = 1
+	else
+		globalEnv.validObjectsTable[hash] = globalEnv.validObjectsTable[hash] + 1
+	end
+
+	globalEnv.currentObjects[hash] = nil
+end
+
+function sanitizeCObjects()
+	for objectName, object in pairs(sanitizedCObjects) do
+		_G[objectName] = object
+	end
+
+	_G["player"] = _G["myHero"]
+end
+
+function sanitizeUnit(unit)
+	if unit == nil then
+		return nil
+	else
+		if not globalEnv.currentObjects[unit.hash] then
+			local unitTable = table.copy(sanitizedCObjects.myHero)
+
+			unitTable.userdataObject = unit
+			unitTable.rawHash = unit.hash
+			unitTable.extendedHash = getCurrentExtendedHash(unit.hash)
+
+			globalEnv.currentObjects[unit.hash] = setmetatable(unitTable, objectMetaTable)
+		end
+
+		return globalEnv.currentObjects[unit.hash]
+	end 
+end
+
+function resolveError(errorMsg)
+	if type(errorMsg) == "string" then
+		return {msg = errorMsg:gsub('[^:]+:[0-9]+:[	 ]*(.*)', "%1"):gsub("\r\n", "\n"):gsub("\n", " "), stackTrace = generateStackTrace(0)}
+	else
+		return errorMsg
+	end
+end
+
+function generateStackTrace(startLevel)
+	result = ""
+
+	debugInfo = debug.getinfo(startLevel + 1)
+	repeat
+		if debugInfo.source:gsub(".*\\", "") ~= "BugsplatAvoider.lua" or debugInfo.currentline ~= executedLineNumber then
+			if debugInfo.source == evalString then
+				debugInfo.source = executedScriptName
+				debugInfo.currentline = debugInfo.currentline + executedLineNumber
+			else
+				debugInfo.source = debugInfo.source:gsub(".*\\", "")
+			end
+
+			if debugInfo.source ~= "=[C]" and debugInfo.source ~= "BugsplatAvoider.lua" then
+				if result == "" then
+					result = debugInfo.source .. " (line " .. debugInfo.currentline .. ")" 
+				else
+					result = debugInfo.source .. " (line " .. debugInfo.currentline .. ") > " .. result
+				end
+			end
+		end
+
+		startLevel = startLevel + 1
+		debugInfo = debug.getinfo(startLevel + 1)
+	until debugInfo == nil
+
+	if result == "" then
+		return "C++ (line unknown)"
+	else
+		return result
+	end
+end
+
+function handleError(errorObject)
+	errorMsg = errorObject.msg
+	stackTrace = errorObject.stackTrace
+	errorType = "WARNING"
+	if errorObject.type ~= nil then
+		errorType = errorObject.type
+	end
+
+	errorSignature = (errorMsg .. stackTrace)
+	if not errorOccurenceTable[errorSignature] then
+		errorOccurenceTable[errorSignature] = {count = 1}
+	else
+		errorOccurenceTable[errorSignature].count = errorOccurenceTable[errorSignature].count + 1
+	end
+
+	if not errorOccurenceTable[errorSignature].lastTick or (GetTickCount() - errorOccurenceTable[errorSignature].lastTick >= sameErrorInterval) then
+		errorOccurenceTable[errorSignature].lastTick = GetTickCount()
+
+		local repeatText = ""
+		if errorOccurenceTable[errorSignature].count > 1 then
+			repeatText = " [" .. tostring(errorOccurenceTable[errorSignature].count) .. " times]"
+		end
+
+		if errorType == "ERROR" then
+			pauseText = ""
+			if pauseScriptOnErrors then
+				disableScriptExecution()
+
+				pauseText = " (script paused)"
+			end
+
+			if showErrorsInChat then
+				PrintChat("<font color='#FF0000'> >> <b>Error: " .. errorMsg .. pauseText .. repeatText .. "</b></font>")
+				if showErrorTraceInChat then PrintChat("<font color='#BB0000'> >> <i>Trace: " .. stackTrace .. "</i></font>") end
+			end
+
+			if logErrors then
+				fileMode = "w+"
+				lines = nil
+				pcall(function() lines = io.lines(SCRIPT_PATH .. "bugsplat.txt") end)
+				if lines ~= nil then
+					for line in lines do
+						if line:gsub("%[([^ ]+).*%].*", "%1") == os.date("%c"):gsub("([^ ]+).*", "%1") then
+							fileMode = "a+"
+						end break
+					end
+				end
+
+				local file, error = assert(io.open(SCRIPT_PATH .. "bugsplat.txt", fileMode))
+				if not error then
+					file:write("[" .. os.date("%c") .. " - " .. executedScriptName .. "] Error: " .. errorMsg .. pauseText .. repeatText .. "\n")
+					file:write("[" .. os.date("%c") .. " - " .. executedScriptName .. "] Trace: " .. stackTrace .. "\n")
+					file:write("\n")
+					file:close()
+				end
+			end
+		else
+			pauseText = ""
+			if pauseScriptOnWarnings then
+				disableScriptExecution()
+
+				pauseText = " (script paused)"
+			end
+
+			if showWarningsInChat then
+				PrintChat("<font color='#FFFF00'> >> <b>Warning: " .. errorMsg .. pauseText .. repeatText .. "</b></font>")
+				if showWarningTraceInChat then PrintChat("<font color='#BBBB00'> >> <i>Trace: " .. stackTrace .. "</i></font>") end
+			end
+
+			if logWarnings then
+				fileMode = "w+"
+				lines = nil
+				pcall(function() lines = io.lines(SCRIPT_PATH .. "bugsplat.txt") end)
+				if lines ~= nil then
+					for line in lines do
+						if line:gsub("%[([^ ]+).*%].*", "%1") == os.date("%c"):gsub("([^ ]+).*", "%1") then
+							fileMode = "a+"
+						end break
+					end
+				end
+
+				local file, error = assert(io.open(SCRIPT_PATH .. "bugsplat.txt", fileMode))
+				if not error then
+					file:write("[" .. os.date("%c") .. " - " .. executedScriptName .. "] Warning: " .. errorMsg .. pauseText .. repeatText .. "\n")
+					file:write("[" .. os.date("%c") .. " - " .. executedScriptName .. "] Trace: " .. stackTrace .. "\n")
+					file:write("\n")
+					file:close()
+				end
+			end
+		end
+
+		errorOccurenceTable[errorSignature].count = 1
+	end
+end
+
+function disableScriptExecution()
+	for functionName, parameterCount in pairs(callBackWrappers) do
+		if _G[functionName] ~= nil then
+			_G[functionName] = function() end
+		end
+	end
+end
+
+function AvoidBugsplats(debugScript)
+	if debugScript then
+		showErrorTraceInChat   = true
+		showWarningTraceInChat = true
+	end
+
+	local debugInfo = debug.getinfo(2) if debugInfo then executedLineNumber = debugInfo.currentline end
+
+	debug.sethook(hook, "l")
+
+	--PrintChat("<font color='#00FF00'> >> <b>Loading script: " .. executedScriptName .. "</b></font>")
+
+	function OnBugSplat()
+	    if globalEnv.bugSplatDetected then return end globalEnv.bugSplatDetected = true
+
+	    if globalEnv.lastLine then
+			local file, error = assert(io.open(SCRIPT_PATH .. "bugsplat.txt", "a+"))
+			if not error then
+				file:write("[" .. os.date("%c") .. " - " .. globalEnv.lastSource .. "] Bugsplat: Uncaught Exception\n")
+				file:write("[" .. os.date("%c") .. " - " .. globalEnv.lastSource .. "] Trace: " .. globalEnv.lastSource .. " (line " .. tostring(globalEnv.lastLine) .. ")\n")
+				file:write("\n")
+				file:close()
+			end
+	    end
+	end
+
+	for i = 1, objManager.iCount, 1 do
+		local object = objManager:GetObject(i)
+		if object ~= nil then
+			sanitizeUnit(object)
+		end
+	end
+
+	for functionName, functionObject in pairs(sanitizedCFunctions) do
+		if _G[functionName] ~= nil then
+			originalEntities[functionName] = _G[functionName]
+			_G[functionName] = functionObject
+		end
+	end
+
+	for objectName, objectFunctions in pairs(sanitizedCObjects) do
+		if _G[objectName] ~= nil then
+			originalEntities[objectName] = _G[objectName]
+			objectFunctions.userdataObject = originalEntities[objectName]
+			objectFunctions.rawHash = originalEntities[objectName].hash or "1"
+			objectFunctions.extendedHash = getCurrentExtendedHash(objectFunctions.rawHash)
+			sanitizedCObjects[objectName] = setmetatable(objectFunctions, objectMetaTable)
+		end
+	end
+
+	sanitizeCObjects()
+
+	evalString = ""
+	currentLine = 1
+	for line in io.lines(SCRIPT_PATH .. executedScriptName) do
+		if currentLine > executedLineNumber then
+			evalString = evalString .. line .. "\n"
+		end
+		currentLine = currentLine + 1
+	end
+
+	loadedFunctionality, errorMsg = load(evalString, nil)
+	if loadedFunctionality ~= nil then
+		functionResult, errorMsg = xpcall(loadedFunctionality, resolveError)
+		if functionResult then
+			for functionName, functionObject in pairs(callBackWrappers) do
+				if _G[functionName] == nil then
+					originalEntities[functionName] = function() end
+				else
+					originalEntities[functionName] = _G[functionName]
+				end
+				_G[functionName] = functionObject
+			end
+
+			if not globalEnv.objectCreationWrappersLoaded then
+				globalEnv.objectCreationWrappersLoaded = true
+
+				_G["OnDeleteObj"] = objectCreationWrappers["OnDeleteObj"]
+			end
+		else
+			handleError(errorMsg)
+		end
+	else
+		handleError(errorMsg)
+	end
+end
